@@ -24,6 +24,9 @@ Resultados Clave
 Equipo del Proyecto
 
 Este proyecto ha sido ideado y desarrollado de forma colaborativa por un equipo de 3 estudiantes de Ciencia de Datos:
+
 Martina Barbarin Urdanoz
+
 Marta De Miguel Mendoza
+
 Marta Goñi Vallez
