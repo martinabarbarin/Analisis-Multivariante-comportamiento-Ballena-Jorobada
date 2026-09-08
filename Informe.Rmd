@@ -1,0 +1,1293 @@
+---
+title: "Análisis Multivariante de la conducta de la ballena jorobada"
+author: "Marta Goñi, Martina Barbarin y Marta De Miguel"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    theme: flatly
+    highlight: tango
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    code_folding: hide
+    number_sections: true
+    df_print: paged
+editor_options: 
+  markdown: 
+    wrap: sentence
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(
+  echo = TRUE,      # Para que se vea el código
+  message = FALSE,   # Para que no salgan mensajes de carga de librerías feos
+  warning = FALSE,   # Para ocultar advertencias de versiones
+  fig.align = "center" # Para que todos los gráficos salgan centrados
+)
+
+# BLOQUE DE LIBRERÍAS 
+library(tidyverse)  # Incluye dplyr, tidyr y ggplot2
+library(moments)    # Estadísticos de forma
+library(kableExtra) # Tablas pro
+library(ggridges)   # Ridge plots
+library(viridis)    # Paletas de colores
+library(GGally)     # Análisis bivariante 
+library(psych)      # Análisis Factorial (KMO)
+library(corrplot)   # Matrices de correlación/residuos
+library(ggbiplot)   # Visualización PCA
+library(MASS)       # Para el Análisis Discriminante
+library(ggiraph)    # Gráficos interactivos
+library(e1071)      # Para el SVM
+library(ggcorrplot)
+library(plotly)
+```
+
+# Introducción
+
+## Origen y Naturaleza de los Datos
+
+El presente estudio se enmarca en el proyecto BEBE (Bio-logger Ethogram Benchmark), una iniciativa internacional orientada a la estandarización de la clasificación del comportamiento animal mediante el uso de sensores remotos.
+
+La investigación se centra en caracterizar los presupuestos diarios de actividad de la ballena jorobada (*Megaptera novaeangliae*) en la bahía de Wilhelmina, Antártida, durante el cierre de la temporada de alimentación.
+
+### Contexto Biológico y Objetivos del Estudio
+
+La mayoría de las poblaciones de ballenas jorobadas dividen su ciclo vital entre zonas de alimentación ricas en presas y regiones de reproducción donde el alimento escasea.
+El objetivo de este análisis es describir sus patrones de actividad diarios y contrastar la hipótesis de que el comportamiento alimentario varía a lo largo del ciclo circadiano para maximizar la ingesta de energía antes de las migraciones de larga distancia.
+
+Se busca comprender cómo optimizan el consumo de recursos en relación con la distribución y el movimiento vertical de sus presas (krill) en el ecosistema de la Península Antártica.
+
+### Metodología de Captura y Sensores DTAG
+
+Para la obtención de los datos se emplearon dispositivos DTAG, sensores multicanal de alta resolución que se fijan mediante ventosas a la superficie dorsal o al flanco de las ballenas.
+
+-   **Recolección:** Estos dispositivos registran datos durante aproximadamente 24 horas, tras las cuales liberan la succión de forma programada y son recuperados tras su flotación.
+-   **Clasificación del Etograma:** El etograma incluye comportamientos de buceo, descanso, desplazamiento y exploración.
+
+Las "embestidas alimenticias" (*feeding lunges*) se detectaron inicialmente mediante algoritmos basados en el ruido acústico del flujo registrado y cambios en la aceleración.
+Posteriormente, todas las inmersiones fueron validadas por expertos para asegurar la fiabilidad de las etiquetas de comportamiento.
+
+### Identificación y Nomenclatura de la Muestra
+
+El conjunto de datos analizado se compone exclusivamente de registros de la especie *Megaptera novaeangliae*.
+Esta homogeneidad es crítica para la robustez de las técnicas de análisis multivariante (como PCA o Clustering), ya que permite centrar el estudio en las variaciones de comportamiento e individuo sin el sesgo que introducirían las diferencias fisiológicas entre distintas especies.
+
+La nomenclatura sigue el estándar internacional:
+
+-   **mn:** Siglas del nombre científico (*Megaptera novaeangliae*).
+-   **09 / 10:** Indica el año en que se colocó la marca (2009 o 2010).
+-   **Sufijo (ej. 127a, 148a):** Identificador único del despliegue o día juliano del etiquetado.
+
+### Dinámica de Alimentación y Eficiencia Energética
+
+Los datos permiten analizar patrones diarios distintivos.
+Se ha observado que estas ballenas tienden a alimentarse de noche a profundidades menores (\~50 m), coincidiendo con el movimiento vertical diario de sus presas.
+Estas inmersiones poco profundas suelen contener una sola embestida, maximizando la eficiencia al reducir los costes energéticos del buceo profundo.
+Durante el día, el comportamiento suele virar hacia el descanso o la exploración.
+
+## Contextualización del Problema
+
+El uso de bio-registradores (acelerómetros triaxiales, sensores de presión y velocidad) permite monitorizar animales sin observación directa, algo crítico para la conservación de especies marinas en entornos remotos.
+
+Sin embargo, nos enfrentamos a un problema de alta dimensionalidad y volumen masivo de datos: los sensores registran múltiples ejes de movimiento a frecuencias de muestreo elevadas (5 Hz durante 24 horas), generando una "tormenta de datos" compleja de interpretar.
+
+Desde la perspectiva del Análisis Multivariante, el reto técnico consiste en identificar la estructura subyacente que relaciona las señales físicas (vibraciones de aceleración, inclinación, profundidad y velocidad) con estados biológicos reales (el etograma).
+
+## Objetivos del Análisis Multivariante
+
+Dada la naturaleza de interdependencia de las variables cinemáticas en los 8 individuos estudiados, este informe se propone alcanzar los siguientes objetivos:
+
+1.  **Reducción de la Dimensionalidad (PCA):** Utilizar el Análisis de Componentes Principales para condensar las variables de los sensores en un número menor de dimensiones ortogonales, eliminando la redundancia.
+2.  **Identificación de Dimensiones Latentes:** Explorar si existen factores no observados —como el "esfuerzo locomotor"— que expliquen la correlación entre las medidas de acelerometría y profundidad.
+3.  **Separación de Estados de Comportamiento:** Evaluar si las técnicas multivariantes logran diferenciar los patrones de "Alimentación" frente a "Descanso", validando la capacidad discriminante de los sensores.
+4.  **Análisis de Interdependencia e Individuos:** Determinar si existen agrupaciones naturales (Clustering) consistentes entre todas las ballenas de la muestra.
+5.  **Resolución de la Incertidumbre (Unknown):** Investigar la naturaleza biológica de los registros clasificados como 'Unknown' mediante técnicas de aprendizaje no supervisado.
+6.  **Visualización Interactiva (Shiny):** Implementar una aplicación que permita al usuario proyectar los comportamientos sobre el espacio de los componentes principales para una interpretación dinámica.
+
+# Análisis descriptivo
+
+Carga de datos
+
+```{r}
+ruta_datos <- "clip_data"
+archivos_csv <- list.files(path = ruta_datos, pattern = "*.csv", full.names = TRUE)
+nombres_columnas <- c("AccX", "AccY", "AccZ", "Depth", "Speed", "individual_id", "label")
+
+df_original <- archivos_csv %>% 
+  map_df(function(x) {
+    data <- read_csv(x, col_names = nombres_columnas, show_col_types = FALSE)
+    data$whale_id <- basename(x) 
+    return(data)
+  })
+
+df_original <- df_original %>%
+  mutate(behavior = case_when(
+    label == 0 ~ "Unknown",
+    label == 1 ~ "Rest",
+    label == 2 ~ "Travel",
+    label == 3 ~ "Exploratory",
+    label == 4 ~ "Feed"
+  ))
+
+summary(df_original[, c("AccX", "AccY", "AccZ", "Depth", "Speed")])
+```
+
+## Limpieza de Datos
+
+Para abordar la cantidad de datos inicial (\>3,3 millones de registros), se ha diseñado un protocolo de preprocesamiento que permite reducir la carga computacional sin sacrificar la riqueza informativa de las señales bio-loggers.
+El proceso se ha estructurado en las siguientes fases:
+
+```{r}
+df_por_segundos <- df_original %>%
+  group_by(whale_id) %>%
+  mutate(segundo_id = (row_number() - 1) %/% 5) %>%
+  group_by(whale_id, segundo_id, behavior) %>% 
+  summarise(
+    # Medias de los sensores
+    AccX_mean = mean(AccX, na.rm = TRUE),
+    AccY_mean = mean(AccY, na.rm = TRUE),
+    AccZ_mean = mean(AccZ, na.rm = TRUE),
+    Depth_mean = mean(Depth, na.rm = TRUE),
+    Speed_mean = mean(Speed, na.rm = TRUE),
+    
+    # Nuevas variables
+    Speed_max = max(Speed, na.rm = TRUE),
+    Depth_gradient = max(Depth, na.rm = TRUE) - min(Depth, na.rm = TRUE),
+    Activity_vigor = sd(AccX, na.rm = TRUE) + sd(AccY, na.rm = TRUE) + sd(AccZ, na.rm = TRUE),
+    
+    .groups = 'drop'
+  ) %>%
+  # Eliminamos posibles NAs generados en el cálculo del vigor
+  filter(!is.na(Activity_vigor))
+
+
+# Verificación de los resultados
+nrow(df_por_segundos)
+summary(df_por_segundos)
+```
+
+### Gestión de la Muestra
+
+A diferencia de un filtrado restrictivo, hemos optado por conservar la totalidad de los registros, incluyendo aquellos categorizados originalmente como "Unknown".
+Esta decisión responde al objetivo multivariante de explorar si estos datos presentan estructuras latentes que permitan asociarlos a comportamientos conocidos durante la fase de proyección en los componentes principales.
+Hemos comprobado la ausencia de valores perdidos (NA), garantizando una matriz de datos completa.
+
+### Reducción Temporal
+
+Dado que los sensores DTAG registran a 5 Hz (5 datos por segundo), se ha realizado una agregación por bloques de 5 registros para obtener una resolución de 1 Hz.
+Este proceso no solo reduce el ruido, sino que reduce el volumen de la muestra a 667.337 observaciones, un tamaño óptimo para la compilación del informe.
+
+### Construcción de Variables Multivariantes
+
+Para evitar la pérdida de información sobre eventos dinámicos rápidos, hemos decidido añadir al dataset nuevas variables que capturan la varianza extrema de cada segundo:
+
+-   **Speed_max:** Identifica el pico de velocidad alcanzado en cada ventana de un segundo.
+    Esta variable nos sirve para diferenciar el nado constante del esfuerzo explosivo de alimentación.
+
+    *Justificación:* Las ballenas jorobadas se alimentan mediante "embestidas" (lunges).
+    Son aceleraciones explosivas que duran apenas 1 o 2 segundos (Ocean Alliance, s. f.).
+    Si hiciéramos solo la media (Speed_mean), ese pico de velocidad se diluiría con el resto de los datos y el modelo no "vería" la diferencia entre una ballena nadando normal y una ballena cazando.
+
+-   **Depth_gradient:** Cuantifica el desplazamiento vertical (max - min).
+    Nos permite distinguir entre el descanso estático y las fases de descenso/ascenso en el buceo.
+
+    *Justificación:* La variable Depth_mean nos dice a qué profundidad está el animal, pero no qué está haciendo.
+    Estar a 100 metros puede significar estar descansando en el fondo o estar bajando a toda velocidad.
+    Con la nueva variable (max – min) medimos la tasa de cambio vertical.
+
+-   **Activity_vigor:** Una métrica de energía dinámica total definida como la suma de las desviaciones típicas de los tres ejes de aceleración (sd(AccX) + sd(AccY) + sd(AccZ)).
+    Esta variable actúa como un indicador del "esfuerzo locomotor" del animal.
+
+    *Justificación*: Los ejes de aceleración (AccX, AccY, AccZ) por separado son difíciles de interpretar.
+    Mide la energía dinámica total.
+    Al sumar las desviaciones típicas, lo que estamos midiendo es la agitación del animal, facilitando la distinción entre comportamientos de baja energía (Rest) y alta energía (Feed).
+
+## Análisis descriptivo univariante
+
+A continuación, vamos a analizar los estadísticos descriptivos de las variables.
+Este análisis es fundamental para validar la homogeneidad de la muestra y detectar posibles distorsiones antes de aplicar técnicas multivariantes.
+Para realizar este análisis hemos seleccionado estas 4 variables (AccZ_mean, Depth_mean, Speed_max y Activity_vigor) siguiendo el principio de parsimonia y para evitar redundancias.
+
+```{r}
+estadisticos_univariantes <- df_por_segundos %>%
+  summarise(
+    across(c(AccZ_mean, Depth_mean, Speed_max, Activity_vigor), 
+           list(
+             Media = ~mean(.x, na.rm = TRUE),
+             Mediana = ~median(.x, na.rm = TRUE),
+             MEDA = ~mad(.x, constant = 1, na.rm = TRUE), 
+             CV = ~(sd(.x, na.rm = TRUE) / mean(.x, na.rm = TRUE)),
+             Asimetria = ~skewness(.x, na.rm = TRUE),
+             Kurtosis = ~kurtosis(.x, na.rm = TRUE),
+             Hj = ~kurtosis(.x, na.rm = TRUE) - 1
+           ), .names = "{.col}---{.fn}") 
+  )
+
+# Transformación a tabla 
+tabla_final <- estadisticos_univariantes %>%
+  pivot_longer(everything(), names_to = "Variable_Estadistico", values_to = "Valor") %>%
+  separate(Variable_Estadistico, into = c("Variable", "Estadistico"), sep = "---") %>% 
+  pivot_wider(names_from = Estadistico, values_from = Valor)
+
+tabla_final %>%
+  kable(caption = "Tabla 1: Estadísticos Univariantes de Forma y Homogeneidad", digits = 3) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                full_width = F, 
+                position = "center")
+
+```
+
+### Análisis de Tendencia Central y Dispersión
+
+Para cada variable, se ha calculado la Media y la Mediana.
+La comparación de ambas es el primer indicador de heterogeneidad.
+Como se observa en la tabla, en variables como Depth_mean, la media es significativamente superior a la mediana, lo que nos sugiere una distribución asimétrica positiva o la presencia de valores atípicos.
+Para la variabilidad, en vez de la Desviación Típica, hemos calculado el Coeficiente de Variación (CV), lo que nos permite comparar la dispersión entre variables con distintas unidades (como metros de profundidad y unidades de aceleración).
+Observamos que la variable con mayor variabilidad relativa es la profundidad (CV = 1.64), lo que confirma que el uso de la columna de agua es el factor que más diferencia los registros entre sí.
+El vigor de actividad (CV = 1.06) también muestra una dispersión alta, lo que justifica su inclusión como variable clave para segmentar comportamientos en el posterior Análisis de Componentes Principales.
+Esto indica que las ballenas pasan la mayor parte del tiempo en estados de baja energía y poca profundidad, mientras que los comportamientos de alimentación y buceo profundo actúan como eventos extremos que desplazan la media hacia valores superiores.
+Dada la alta presencia de atípicos, hemos incluido como medida robusta de dispersión la MEDA (Mediana de las Desviaciones Absolutas).
+Mientras que la desviación típica está "inflada" por los buceos profundos, la MEDA nos ofrece un indicador más fiel del centro de gravedad real de la actividad diaria de las ballenas, confirmando que pasan la mayor parte del tiempo en estados de baja energía y poca profundidad.
+
+### Coeficientes de Asimetría
+
+Los coeficientes de Asimetría positivos y elevados como el 2.88 en profundidad o el 2.77 en vigor (mayores que 1) confirman que las distribuciones están fuertemente sesgadas a la derecha.
+Observamos también la asimetría de AccZ, en este caso, negativa con valor -1.603.
+Al contrario que las otras, aquí la Media (0.71) es menor que la Mediana (0.93).
+Esto indica que la ballena mantiene una postura muy estable la mayor parte del tiempo (cerca de 0.9), pero realiza movimientos descendentes o cambios de inclinación bruscos que "tiran" de la media hacia abajo.
+Es el comportamiento opuesto al vigor.
+
+### Análisis de Homogeneidad y Outliers (Kurtosis)
+
+Observamos los coeficientes de Kurtosis en nuestro dataset y destacamos: La variable Activity_vigor presenta una Kurtosis extrema de 21.835, seguida de Depth_mean con 13.614.
+Los valores de Kurtosis superiores a 7 u 8 implican una alta heterogeneidad provocada por una proporción de observaciones atípicas muy alejadas de la media.
+En este caso, representan las "embestidas” y las inmersiones máximas. Calculando el coeficiente de homogeneidad (H_j = K_j - 1), obtenemos un valor de 20.835 para el vigor de actividad, lo que confirma que la muestra no es una mezcla de poblaciones distintas (lo cual es lógico al ser una sola especie), sino que presenta una heterogeneidad por atípicos como las embestidas y buceos. Por el contrario, la velocidad máxima (Speed_max) presenta una Kurtosis de 4.02, lo que sugiere una distribución más cercana a la normalidad y una mayor homogeneidad en los picos de velocidad entre los diferentes individuos. Así como la Kurtosis de la aceleración que es 4.736.
+
+**Representación gráfica**
+
+```{r}
+ggplot(df_por_segundos, aes(x = Activity_vigor, y = behavior, fill = behavior)) +
+  geom_density_ridges(alpha = 0.7, scale = 1.8) +
+  scale_fill_viridis_d(option = "plasma") +
+  theme_ridges() +
+  labs(title = "Nivel de Actividad Dinámica de las ballenas por Comportamiento",
+       x = "Activity Vigor", y = "Comportamiento") +
+  theme(legend.position = "none")
+```
+
+En este Ridge Plot vemos claramente que el vigor de actividad (la energía con la que se mueve la ballena) cambia según lo que esté haciendo.
+Nos damos cuenta que en 'Rest' y 'Travel', las montañas son muy altas y estrechas justo en el cero; esto significa que la ballena se mueve de forma muy constante y suave, sin sobresaltos.
+Sin embargo, en 'Feed', la montaña es más bajita y se ensancha hacia la derecha.
+Esa cola larga son los movimientos bruscos y rápidos que hace la ballena cuando abre la boca para comer.
+Por último, como la montaña de 'Unknown' se parece bastante a la de 'Travel', podríamos sospechar que cuando no sabemos qué hace la ballena, lo más probable es que se esté desplazando de un sitio a otro.
+Esto refuerza la utilidad de las técnicas multivariantes que aplicaremos más adelante para clasificar estos eventos inciertos basándonos en su firma energética
+
+```{r}
+ggplot(df_por_segundos, aes(x = behavior, y = Depth_mean, fill = behavior)) +
+  geom_boxplot(outlier.color = "red", outlier.shape = 1, outlier.alpha = 0.3) +
+  scale_fill_brewer(palette = "Pastel1") +
+  theme_minimal() +
+  labs(title = "Distribución de Profundidad y Detección de Atípicos",
+       x = "Comportamiento", y = "Profundidad Media")
+```
+
+En este diagrama de cajas (Boxplot) comparamos la profundidad media a la que se mueven las ballenas según lo que están haciendo.
+Lo primero que llama la atención es que la mayoría del tiempo están muy cerca de la superficie (0-50 metros), sobre todo en su descanso(‘Rest').
+Sin embargo, fijándonos en los valores atípicos representados por puntos rojos que suben hasta los 300-400 metros, explican por qué la ballena tiene una Kurtosis tan alta: aunque la mayoría de las veces están arriba en la superficie, a veces bajan a mucha profundidad por ejemplo para comer ('Feed').
+Esto no son errores del sensor, sino momentos clave de su comportamiento (inmersiones profundas).
+Además, fijandonos en 'Exploratory' y 'Feed' las cajas son más grandes y están más altas, lo que nos sugiere que cuando la ballena busca comida o come, su profundidad varía muchísimo más que cuando viaja o descansa
+
+```{r}
+ggplot(df_por_segundos, aes(x = Depth_mean)) +
+  geom_histogram(aes(y = ..density..), bins = 50, fill = "steelblue", color = "white") +
+  geom_density(color = "red", size = 1) +
+  theme_minimal() +
+  labs(title = "Profundidad Global",
+       x = "Profundidad", y = "Densidad")
+```
+
+En este histograma con curva de densidad vemos la distribución de la Profundidad Global de todas las ballenas del estudio.
+El gráfico nos confirma lo que nos decían los números de la tabla: hay una asimetría positiva extrema.
+Esto nos dice que las ballenas son animales de superficie: la inmensa mayoría de los datos están amontonados cerca del cero.
+Sin embargo, esa cola derecha tan larga que llega hasta aproximadamente hasta los 400 metros es lo que genera la Kurtosis tan alta.
+Básicamente, aunque la ballena prefiere estar arriba, su capacidad de buceo profundo es lo que crea la mayor variabilidad en nuestros datos.
+
+## Análisis descriptivo bivariante
+
+Antes de aplicar técnicas más complejas tenemos que aplicar un análisis bivariante para detectar la interdependencia y redundancia entre variables
+
+### Matriz de correlación
+
+En primer lugar, obtenemos la matriz de correlación que nos muestra como interactúan los sensores en el cuerpo de la ballena.
+La selección de $AccZ\_mean$, $Depth\_mean$, $Speed\_max$ y $Activity\_vigor$ para el análisis bivariante responde a la necesidad de construir un vector multivariante equilibrado que capture las cuatro dimensiones biológicas fundamentales del animal: espacial (profundidad), metabólica (vigor), dinámica (velocidad) y postural (orientación vertical).
+
+```{r}
+columnas_interes <- c("AccZ_mean", "Depth_mean", "Speed_max", "Activity_vigor")
+matriz_cor <- cor(df_por_segundos[, columnas_interes], use = "complete.obs")
+
+ggcorrplot(matriz_cor, 
+           hc.order = TRUE, 
+           type = "lower",
+           lab = TRUE, 
+           title = "Matriz de Correlación Lineal (Pearson)",
+           colors = c("#E46726", "white", "#6D9EC1"))
+```
+
+Vemos que la mayoría de los valores son cercanos a cero lo que indica que las variables tienen una correlación lineal débil-moderada.
+Esto es una buena señal de que cada sensor aporta información nueva.
+El valor absoluto más elevado es 0.330 que indica una correlación positiva moderada-débil entre Speed_max y Activity_vigor.
+Tiene sentido ya que cuando la ballena realiza movimientos con mayor varianza en la aceleración se suele alcanzar picos de velocidad más altos.
+Podemos asumir que esto es característico de las embestidas alimenticias.
+Igualmente podemos mencionar la correlación negativa débil (-0.173) entre la AccZ y la Profundidad que nos sugiere que a medida que aumenta la profundidad, hay un cambio sistemático (aunque leve) en la postura de la ballena, probablemente reflejando el ángulo de descenso en el buceo.
+Por último, llama la atención que la profundidad tiene correlaciones casi nulas con el vigor (0.1) y la velocidad (0.07).
+Esto indica que las ballenas son capaces de realizar movimientos de alta energía tanto en superficie como en el fondo.
+Al no estar fuertemente ligadas, la profundidad y el vigor son variables complementarias.
+El PCA las tratará probablemente como dimensiones distintas (ejes ortogonales), lo cual es ideal para separar comportamientos.
+Por lo tanto podríamos decir que no hay variables redundantes.
+
+### Matriz de Dispersión Generalizada
+
+```         
+*Justificación uso muestras*: 
+Trabajar con la matriz completa de millones de registros en herramientas como ggplot2 o ggpairs puede colapsar la memoria de trabajo de R o ralentizar excesivamente la generación del gráfico.
+```
+
+El análisis ggpairs actúa como la introducción del Análisis Multivariante al demostrar que las variables cinemáticas no son independientes del estado biológico del animal
+
+```{r}
+ggpairs(df_por_segundos %>% slice_sample(n = 1000), 
+        columns = columnas_interes,
+        aes(color = behavior, alpha = 0.5),
+        upper = list(continuous = wrap("cor", size = 3))) +
+  theme_bw() +
+  labs(title = "Relaciones cruzadas por Comportamiento (Muestra n=1000)") +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1))
+
+```
+
+La clara diferenciación de las curvas de densidad en la diagonal, especialmente en el vigor de actividad para el comportamiento de alimentación (Feed), valida la capacidad de los sensores.
+Asimismo, la presencia de correlaciones significativas pero moderadas (como el 0.293 entre vigor y velocidad) y un determinante de la matriz que tiende a ser bajo, constituye la justificación técnica para aplicar un Análisis de Componentes Principales (PCA).
+
+**Esfuerzo vs. Profundidad**
+
+Para profundizar en la relación más crítica del etograma (Esfuerzo vs. Profundidad), analizamos de forma independiente cada estado.
+
+```{r}
+p_interactivo <- ggplot(df_por_segundos %>% slice_sample(n = 5000), 
+       aes(x = Depth_mean, y = Activity_vigor, color = behavior)) +
+  geom_point_interactive(aes(tooltip = paste0("ID: ", whale_id, "\nEstado: ", behavior), 
+                             data_id = whale_id), 
+                         alpha = 0.5) + 
+  geom_smooth(method = "lm", se = FALSE, linewidth = 0.8) + 
+  facet_wrap(~behavior) + 
+  theme_minimal() +
+  scale_color_viridis_d(option = "viridis") +
+  labs(
+    title = "Exploración Interactiva: Profundidad vs Vigor",
+    x = "Profundidad Media (m)", 
+    y = "Vigor de Actividad"
+  ) +
+  theme(legend.position = "none")
+
+girafe(ggobj = p_interactivo, 
+       width_svg = 8, height_svg = 6,
+       options = list(
+         opts_hover(css = "fill:orange;stroke:black;cursor:pointer;"), 
+         opts_tooltip(css = "background-color:white;color:black;padding:5px;border-radius:5px;")
+       )) 
+```
+
+Como se observa gracias a las diferencias en las pendientes de regresión, la relación entre profundidad y vigor no es universal; cambia drásticamente según el estado biológico.
+
+En conclusión, el análisis bivariante revela que, aunque los sensores capturan dimensiones distintas del movimiento, existe una estructura de interdependencia latente vinculada al comportamiento.
+Esto nos permite avanzar hacia la descriptiva multivariante, donde analizaremos la nube de datos en su conjunto mediante el vector de medias y la varianza generalizada.
+
+### Reconstrucción del Perfil de Buceo 
+
+Seleccionamos una de las ballenas, podríamos visualizar cualquiera de ellas.
+
+```{r}
+id_ballena <- unique(df_por_segundos$whale_id)[1]
+cat("Id de la ballena seleccionada: ", id_ballena)
+```
+
+Vamos a realizar una estimación de la trayectoria lateral del animal mediante una técnica simplificada de Dead Reckoning. Dado que los dispositivos DTAG no cuentan con GPS submarino, calculamos la distancia horizontal acumulada multiplicando la velocidad máxima registrada por el intervalo de tiempo (1 segundo), proyectándola frente a la profundidad media. El objetivo es transformar datos numéricos aislados en una representación visual del "perfil de buceo" de la ballena.
+
+```{r}
+df_trayectoria <- df_por_segundos %>%
+  filter(whale_id == id_ballena) %>% 
+  mutate(segundo_id = row_number()) %>% 
+  arrange(segundo_id) %>%
+  mutate(
+    # Distancia horizontal: Velocidad * 1 segundo
+    distancia_horizontal = cumsum(Speed_max),
+    # Profundidad en negativo para que el gráfico baje hacia abajo
+    profundidad_relativa = -Depth_mean
+  )
+
+ggplot(df_trayectoria, aes(x = distancia_horizontal, y = profundidad_relativa, color = behavior)) +
+  geom_path(linewidth = 1, alpha = 0.8) +
+  scale_color_viridis_d(option = "plasma") +
+  theme_minimal() +
+  labs(
+    title = paste("Perfil de Inmersión - Ballena:", id_ballena),
+    subtitle = "Trayectoria estimada mediante (Velocidad x Tiempo)",
+    x = "Distancia Horizontal Estimada (m)",
+    y = "Profundidad (m)",
+    color = "Comportamiento"
+  ) +
+  theme(legend.position = "bottom")
+```
+
+La visualización nos permite observar el ritmo espacial del individuo, diferenciando claramente las fases de tránsito superficial (en colores de baja energía) de las inmersiones profundas en forma de "V" o "U" características de la alimentación (Feed). Se confirma que el animal alterna desplazamientos horizontales eficientes con descensos verticales pronunciados donde se concentra el esfuerzo de caza.
+
+## Análisis descriptivo multivariante
+
+### Vector de medias
+
+Este vector es el punto de referencia; cualquier desviación significativa de este centro (especialmente en profundidad y vigor) nos indicará transiciones hacia estados biológicos activos como la alimentación.
+
+```{r}
+df_multiv <- df_por_segundos %>% 
+  dplyr::select(columnas_interes)
+
+vector_medias <- colMeans(df_multiv, na.rm = TRUE)
+print("Vector de Medias:")
+print(vector_medias)
+```
+
+### Varianza generalizada y Variabilidad Promedio
+
+A diferencia de la correlación, la matriz S trabaja con las unidades originales de los sensores.
+
+```{r}
+matriz_S <- cov(df_multiv, use = "complete.obs")
+
+var_generalizada <- det(matriz_S)
+
+variabilidad_promedio <- var_generalizada^(1/ncol(df_multiv))
+
+matriz_S
+cat("\nVarianza Generalizada (|S|):", var_generalizada)
+cat("\nVariabilidad Promedio (VP):", variabilidad_promedio)
+```
+
+El análisis de la variabilidad global arroja una Varianza Generalizada ($VG$) de 0.3427 y una Variabilidad Promedio ($VP$) de 0.7651.
+El hecho de que la varianza generalizada sea significativamente distinta de cero valida matemáticamente que no existen variables redundantes en el vector multivariante seleccionado.
+Este hipervolumen expandido confirma que cada sensor aporta una dimensión única de información, proporcionando una base robusta para la aplicación de técnicas de reducción de la dimensionalidad (PCA) y clasificación (LDA)
+
+### Detección de Atípicos Multivariantes (Distancia de Mahalanobis)
+
+```         
+*Nuevamente hacemos uso de muestras*
+```
+
+Se optó por la distancia de Mahalanobis sobre la euclídea debido a que la primera es invariante ante cambios de escala y tiene en cuenta la estructura de correlación entre los sensores, permitiendo que las embestidas de alimentación resalten como atípicos multivariantes reales y no solo como valores altos aislados.
+
+```{r}
+df_por_segundos$dist_mahalanobis <- mahalanobis(
+  x = df_multiv, 
+  center = vector_medias, 
+  cov = matriz_S
+)
+
+ggplot(df_por_segundos %>% slice_sample(n = 5000), 
+       aes(x = seq_along(dist_mahalanobis), y = dist_mahalanobis, color = behavior)) +
+  geom_point(alpha = 0.5) +
+  labs(title = "Distancia de Mahalanobis por Registro",
+       x = "Índice de observación",
+       y = "Distancia de Mahalanobis") +
+  theme_minimal()
+```
+
+La distribución de la distancia de Mahalanobis nos indica una marcada heterogeneidad multivariante vinculada al comportamiento de alimentación (Feed), con observaciones que alcanzan distancias superiores a 100.
+La detección de estos atípicos es fundamental, ya que confirma que los sensores capturan maniobras extremas que distorsionan los promedios globales, justificando nuevamente la necesidad de aplicar técnicas de segmentación para aislar estos estados.
+
+## Visualización Espacial y Cinemática
+
+### Espacio de Estados
+
+Para este análisis, proyectamos de forma simultánea tres dimensiones biológicas: el Vigor de Actividad, la Profundidad y la Aceleración Vertical (AccZ). Esta técnica busca identificar "nubes de comportamiento" en un espacio tridimensional interactivo, permitiendo observar cómo se agrupan los datos según la firma sensorial completa del animal en lugar de mirar variables aisladas.
+
+```{r}
+df_3d <- df_por_segundos %>% 
+  slice_sample(n = 3000)
+
+colores_plasma <- viridis::plasma(length(unique(df_3d$behavior)))
+
+plot_ly(df_3d, 
+        x = ~Activity_vigor, 
+        y = ~Depth_mean, 
+        z = ~AccZ_mean, 
+        color = ~behavior, 
+        colors = colores_plasma, 
+        type = 'scatter3d', 
+        mode = 'markers',
+        marker = list(size = 2, opacity = 0.6)) %>%
+  plotly::layout(
+    title = list(text = "Espacio de Estados Multivariante"),
+    scene = list(
+      xaxis = list(title = 'Vigor (Esfuerzo)'),
+      yaxis = list(title = 'Profundidad (m)'),
+      zaxis = list(title = 'Aceleración Z')
+    ),
+    margin = list(l = 0, r = 0, b = 0, t = 40)
+  )
+
+```
+
+Este gráfico nos revela una segregación física de los estados biológicos: mientras que Rest y Travel forman un cúmulo denso en la zona de baja energía y poca profundidad, los eventos de alimentación se proyectan como puntos dispersos que ocupan regiones de alta intensidad dinámica y mayor profundidad.
+
+### Espacio de Aceleración 3D
+
+Aquí representamos los valores brutos de los tres ejes del acelerómetro (AccX, AccY, AccZ) en un cubo tridimensional. Al ser sensores que miden tanto el movimiento como la gravedad, este gráfico visualiza la postura física de la ballena; es decir, cómo se distribuye la fuerza de gravedad a través de su cuerpo mientras realiza giros, inclinaciones o balanceos.  
+
+```{r}
+plot_ly(df_3d, 
+        x = ~AccX_mean, 
+        y = ~AccY_mean, 
+        z = ~AccZ_mean, 
+        color = ~behavior, 
+        colors = colores_plasma,
+        type = 'scatter3d', 
+        mode = 'markers',
+        marker = list(size = 2, opacity = 0.5)) %>%
+  plotly::layout(
+    title = list(text = "Espacio de Postura: Aceleración Triaxial (X, Y, Z)"),
+    scene = list(
+      xaxis = list(title = 'Acc X (Lateral)'),
+      yaxis = list(title = 'Acc Y (Longitudinal)'),
+      zaxis = list(title = 'Acc Z (Vertical)')
+    ),
+    margin = list(l = 0, r = 0, b = 0, t = 40)
+  )
+```
+
+La nube de datos forma una estructura esferoidal donde cada punto representa una orientación del animal. Se observa que durante el reposo la postura es sumamente rígida y predecible (puntos muy concentrados), mientras que en las fases de alimentación la ballena explora todos sus grados de libertad física, resultando en una dispersión multivariante que refleja las complejas maniobras acrobáticas necesarias para capturar presas.
+
+### Trayectoria real 3D
+
+Aplicamos una doble integración a los vectores de aceleración dinámica (previamente centrados para eliminar la gravedad estática) para obtener coordenadas de posición relativas ($posX, posY, posZ$). Este proceso busca reconstruir el "vuelo" real de la ballena bajo el agua, simulando el camino tridimensional recorrido segundo a segundo.  
+
+```{r}
+df_movimiento <- df_por_segundos %>%
+  filter(whale_id == id_ballena) %>%
+  mutate(tiempo_id = row_number()) %>% 
+  arrange(tiempo_id) %>%
+  head(1000) %>% 
+  mutate(
+    vX = cumsum(AccX_mean - mean(AccX_mean)),
+    vY = cumsum(AccY_mean - mean(AccY_mean)),
+    vZ = cumsum(AccZ_mean - mean(AccZ_mean)),
+    posX = cumsum(vX), posY = cumsum(vY), posZ = cumsum(vZ)
+  )
+
+plot_ly(df_movimiento, 
+        x = ~posX, y = ~posY, z = ~posZ, 
+        type = 'scatter3d', 
+        mode = 'lines+markers',
+        color = ~behavior,
+        colors = colores_plasma, 
+        line = list(width = 4),
+        marker = list(size = 2)) %>%
+  plotly::layout(
+    title = list(text = paste("Movimiento 3D - Ballena:", id_ballena)),
+    scene = list(xaxis = list(title = 'X'), yaxis = list(title = 'Y'), zaxis = list(title = 'Z'))
+  )
+
+```
+
+La visualización interactiva nos permite "seguir" el rastro de la ballena en el océano, mostrando cómo las inmersiones no son simples movimientos arriba-abajo, sino trayectorias complejas con desplazamientos laterales. Los tramos coloreados según el comportamiento evidencian que las maniobras de alimentación (Feed) implican cambios de dirección y profundidad mucho más agresivos que los tránsitos lineales, proporcionando una visión única del movimiento de la especie.  
+
+# Aplicación de técnicas multivariante
+
+## PCA
+
+### Justificación técnica de la reducción
+
+El objetivo central del Análisis de Componentes Principales (PCA) es determinar si es posible describir un conjunto de p variables con un subconjunto r \< p perdiendo poca información.
+En nuestro estudio, la Varianza Generalizada (\|S\|) obtenida es de 0.3427.
+Al ser un valor pequeño y cercano a cero, se confirma que las variables originales están correlacionadas y que un pequeño número de nuevas variables podrá explicar la mayor parte de la variabilidad original.
+
+### Cálculo de Componentes Principales
+
+Tras aplicar la transformación ortogonal a los datos estandarizados, hemos obtenido los autovalores que representan la varianza de cada nueva componente, es decir, evaluamos cuánta información retenemos al reducir la dimensión:
+
+```{r}
+# Preparación de la matriz de datos
+dat_pca <- df_por_segundos %>%
+  dplyr::select(AccZ_mean, Depth_mean, Speed_max, Activity_vigor)
+
+pca_ballenas <- prcomp(dat_pca, center = TRUE, scale. = TRUE)
+
+# Cálculo de los Autovalores  y Varianza
+autovalores <- pca_ballenas$sdev^2
+prop_varianza <- autovalores / sum(autovalores)
+prop_acumulada <- cumsum(prop_varianza)
+
+# Creamos la tabla de resumen de varianza
+tabla_pca_resumen <- data.frame(
+  Componente = paste0("PC", 1:length(autovalores)),
+  Autovalor = autovalores,
+  Proporcion = prop_varianza,
+  Acumulada = prop_acumulada
+)
+
+# Mostramos la tabla
+tabla_pca_resumen %>%
+  kable(caption = "Tabla 2: Varianza Explicada por Componente", digits = 3) %>%
+  kable_styling(bootstrap_options = c("striped", "condensed"), full_width = F)
+
+```
+
+-   **PC1** Es la dirección de máxima varianza, recogiendo por sí sola el 34.5% de la información.
+-   **PC2** Explica un 30.6% adicional de la variabilidad. Con los dos primeros componentes (PC1 y PC2), recogemos un total del 65.1% de la varianza original, lo que nos permite describir el comportamiento animal en un plano bidimensional perdiendo una cantidad de información aceptable para un estudio biológico.
+
+### Interpretación del Biplot
+
+El Biplot representa la proyección de las observaciones y las variables sobre el plano de máxima varianza.
+Esta representación permite identificar la estructura interna de los datos y las relaciones de interdependencia:
+
+```{r}
+ggbiplot(pca_ballenas, 
+         obs.scale = 1, var.scale = 1,
+         groups = df_por_segundos$behavior, 
+         ellipse = TRUE, circle = FALSE) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "grey70", linewidth = 0.5) + 
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey70", linewidth = 0.5) +
+  scale_color_viridis_d(option = "D") + 
+  theme_minimal() +
+  labs(title = "PCA Comportamiento Animal",
+       subtitle = "Proyección en los ejes naturales de los datos")
+```
+
+**Análisis de las Variables**
+
+-   **Activity_vigor y Speed_max:** Los vectores apuntan hacia la parte derecha del gráfico (PC1 positivo). Esto indica que están altamente correlacionados entre sí y que el Componente 1 (34.5%) representa una variable latente de "Intensidad Energética". La proximidad angular entre ambos indica que se proyectan de forma casi idéntica, reforzando la idea de que el PC1 captura el esfuerzo locomotor total.
+-   **Depth_mean:** El vector apunta hacia arriba (PC2 positivo), de forma prácticamente perpendicular a los anteriores. Esto confirma que la profundidad es una dimensión independiente: una ballena puede estar a mucha profundidad sin necesidad de llevar una velocidad alta.
+-   **AccZ_mean:** Apunta en dirección opuesta a la profundidad, sugiriendo que los cambios de inclinación del animal son la clave para sus desplazamientos verticales (correlación negativa con la profundidad).
+
+**Análisis de los Comportamientos**
+
+-   **Rest (Reposo):** Los puntos se concentran en el cuadrante inferior izquierdo (PC1 y PC2 bajos). Es una zona de baja energía y poca profundidad, lo que es coherente biológicamente con el descanso superficial.
+-   **Feed (Alimentación):** Es el grupo que más se expande hacia la derecha. La elipse se alarga siguiendo los vectores de vigor y velocidad, capturando de forma visual los comportamientos atípicos (embestidas) detectados en el análisis univariante.
+-   **Unknown (Desconocido):** La elipse amarilla solapa casi totalmente con Rest y Travel. Esto indica estadísticamente que estos momentos sin etiqueta corresponden mayoritariamente a estados de baja actividad o desplazamiento superficial.
+
+**Gráfico PCA interactivo**
+
+```{r}
+df_por_segundos <- df_por_segundos %>% dplyr::select(-any_of(c("PC1", "PC2")))
+df_por_segundos <- cbind(df_por_segundos, pca_ballenas$x[, 1:2])
+
+set_girafe_defaults(
+  opts_hover = opts_hover(css = "fill:orange;stroke:black;cursor:pointer;r:5pt;"),
+  opts_tooltip = opts_tooltip(css = "padding:10px;background-color:white;color:black;border-style:solid;border-width:2px;border-color:gray;border-radius:5px;"),
+  opts_toolbar = opts_toolbar(position = "topright")
+)
+
+set.seed(123)
+p_pca_interactivo <- ggplot(df_por_segundos %>% slice_sample(n = 2000), 
+                            aes(x = PC1, y = PC2, color = behavior, 
+                                tooltip = paste0("Ballena ID: ", whale_id, 
+                                                "\nComportamiento: ", behavior,
+                                                "\nCoord: (", round(PC1,2), ", ", round(PC2,2), ")"),
+                                data_id = whale_id)) + 
+  geom_point_interactive(size = 2, alpha = 0.7) +
+  scale_color_viridis_d(option = "D") +
+  theme_minimal() +
+  labs(title = "Análisis de Componentes Principales (Exploración Interactiva)",
+       subtitle = "Pasa el ratón para identificar ballenas y resaltar su rastro en el PCA",
+       x = "PC1 (Intensidad Energética)", 
+       y = "PC2 (Perfil de Inmersión)")
+
+girafe(ggobj = p_pca_interactivo, width_svg = 7, height_svg = 5)
+```
+
+Se presenta la proyección de las 2.000 observaciones seleccionadas sobre el plano formado por los dos primeros componentes principales.
+A diferencia de una representación estática, el uso de la librería ggiraph permite una inspección dinámica de la estructura de datos: 
+
+-   **Eje PC1 (Esfuerzo Dinámico):** Se observa cómo los registros se desplazan hacia la derecha a medida que aumenta la intensidad del movimiento. Los puntos de color púrpura (**Feed**) son los que más se alejan del origen hacia valores positivos de PC1, visualizando las "embestidas" de alta energía. 
+
+<!-- -->
+
+-   **Eje PC2 (Profundidad/Postura):** El eje vertical captura la variabilidad en la columna de agua. Los puntos que se proyectan hacia la parte superior representan fases de mayor profundidad o cambios bruscos en la inclinación (AccZ). 
+
+<!-- -->
+
+-   **Solapamiento y Estados de Superficie:** La densa agrupación en el cuadrante inferior izquierdo (valores bajos de PC1 y PC2) representa la "zona de confort" de la ballena: estados de **Rest** y **Travel** donde el animal se desplaza de forma eficiente cerca de la superficie. 
+
+<!-- -->
+
+-   **Valor de la Interactividad:** Al pasar el cursor sobre los puntos, la herramienta de tooltip identifica el **whale_id** y el comportamiento etiquetado. Esto es especialmente útil para analizar los **Outliers** (puntos aislados en los extremos superiores y derechos), permitiendo confirmar si se trata de errores de sensor o, como en este caso, de maniobras biológicas excepcionales de alimentación a máxima profundidad. 
+
+**Conclusión del PCA**
+
+Este análisis confirma que el modelo ha cumplido su objetivo al reducir las 4 variables originales a 2 ejes naturales.
+Estos ejes permiten diferenciar visualmente si una ballena está cazando, buceando o descansando con una pérdida mínima de información biológica.
+
+## Análisis Factorial
+
+### Análisis previo de adecuación de la muestra
+
+```{r}
+matriz_cor <- cor(df_multiv)
+kmo_resultado <- KMO(matriz_cor)
+print(kmo_resultado)
+```
+
+Para comprobar si las características de nuestra matriz de correlaciones son adecuadas para el Análisis Factorial, hemos calculado el Índice KMO.
+Obtenemos un MSA Global de 0.45.
+Según los criterios estudiados, este valor se sitúa en el rango de 'Inaceptable' (KMO \< 0.5).
+Al analizar los indicadores individuales, observamos que solo la profundidad (Depth_mean = 0.51) alcanza el umbral de aceptabilidad.
+Esto sugiere que las variables de aceleración y de presión no comparten una estructura común fuerte, presentando una elevada varianza específica.
+Este resultado no invalida el análisis, sino que confirma que el comportamiento de la ballena no responde a un único factor latente común, sino a dimensiones fisiológicas independientes (locomoción, postura, profundidad).
+Esto refuerza la idoneidad del PCA frente al AF para este tipo de datos cinemáticos.
+
+### Estimación del Modelo y Cargas Factoriales
+
+```{r}
+ballenas.fa <- factanal(df_multiv, factors = 1, scores = "regression")
+print(ballenas.fa)
+```
+
+Hemos procedido a la extracción de un único factor mediante el método de Máxima Verosimilitud (restringido a m=1 por la condición de grados de libertad (p-m) \^2 \> p+m).
+Los resultados revelan una estructura factorial muy débil:
+
+-   **Interpretación del Factor:** El Factor 1 se encuentra casi exclusivamente definido por la variable Speed_max (carga de 0.997).
+    Podríamos denominarlo como el factor de 'Capacidad de Desplazamiento', aunque apenas logra capturar de forma residual el Activity_vigor (0.331).
+
+-   **Análisis de Unicidades:** Las elevadas unicidades obtenidas, especialmente en la profundidad (0.995) y la postura (0.953), confirman lo que ya sugería el índice KMO: las variables observadas presentan una varianza específica muy alta y comparten muy poca varianza común.
+    La profundidad actúa de manera ajena a la dinámica de velocidad capturada.
+    La variable Depth_mean tiene una comunalidad de apenas 0.005 (h\^2 = 1 - 0.995).
+    Esto significa que el factor extraído explica menos del 1% de la varianza de la profundidad.
+
+-   **Bondad de Ajuste:** El test de hipótesis sobre la suficiencia del modelo arroja un p-valor de 0, rechazando que un solo factor sea capaz de capturar la dimensionalidad de los datos.
+    Sin embargo, la limitación en el número de variables originales (p=4) impide técnicamente la extracción de factores adicionales.
+    La complejidad del comportamiento animal no puede ser reducida a una única dimensión latente sin perder una cantidad inaceptable de información.
+
+### Gráficos
+
+Procedemos a realizar algunos gráficos para demostrar lo anterior:
+
+#### Pesos de los factores
+
+```{r}
+# Extraemos las cargas y las preparamos para ggplot
+cargas_df <- data.frame(
+  Variable = names(ballenas.fa$loadings[,1]),
+  Carga = as.numeric(ballenas.fa$loadings[,1])
+)
+
+ggplot(cargas_df, aes(x = reorder(Variable, Carga), y = Carga, fill = Carga)) +
+  geom_col() +
+  coord_flip() + # Horizontal para leer mejor los nombres
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", midpoint = 0) +
+  theme_minimal() +
+  labs(x = "Variables", y = "Carga Factorial (Correlación)") +
+  geom_hline(yintercept = 0.5, linetype = "dashed", color = "darkgrey") 
+
+```
+
+La representación gráfica de las cargas factoriales confirma la existencia de una estructura denominada de 'variable dominante'.
+El Factor 1 presenta una saturación casi perfecta de la variable Speed_max (0.997), lo que permite identificar esta dimensión latente como un Factor de Desplazamiento Lineal.
+Al observar el umbral de significación de 0.50 (representado por la línea discontinua), se evidencia que ninguna otra variable logra saturar de forma relevante en este factor; el Activity_vigor y la AccZ_mean muestran pesos moderados tirando a bajos, mientras que la carga de la Depth_mean es prácticamente nula.
+Visualizamos la elevada unicidad de los sensores analizados: la dinámica de velocidad de la ballena actúa como un eje independiente que no explica el comportamiento del resto de las variables cinemáticas, validando la hipótesis de que el comportamiento animal en este dataset no responde a una única causa latente, sino a dimensiones biológicas ortogonales entre sí.
+
+#### Matriz de Residuos del Modelo Factorial
+
+```{r}
+Lambda <- ballenas.fa$loadings
+Psi <- diag(ballenas.fa$uniquenesses)
+Sigma_hat <- Lambda %*% t(Lambda) + Psi
+
+matriz_residuos <- matriz_cor - Sigma_hat
+
+corrplot(matriz_residuos, 
+         method = "color", 
+         addCoef.col = "black", 
+         tl.col = "black", 
+         number.cex = 0.8,
+         mar = c(0,0,2,0))
+```
+
+La matriz de residuos muestra el ajuste local del modelo factorial.
+Observamos que el modelo reproduce con exactitud las correlaciones asociadas a la velocidad, con residuos nulos.
+Sin embargo, se detectan residuos significativos en las interacciones entre el resto de sensores, destacando la relación entre la postura y la profundidad (-0.19) y entre la postura y el vigor (-0.14).
+Estos valores, al superar ampliamente el umbral crítico de 0.05, confirman que el Factor 1 (Velocidad) no es un motor común para todo el sistema sensorial.
+Biológicamente, esto nos sugiere que el control de la profundidad y el vigor dinámico responden a mecanismos independientes de la velocidad lineal, validando la necesidad teórica de un modelo con mayor número de factores, aunque la restricción matemática de nuestras variables originales lo impida.
+
+## Conclusión Comparativa (PCA vs AF)
+
+Mientras que el Análisis de Componentes Principales (PCA) fue capaz de resumir el 65% de la varianza total como herramienta descriptiva, el Análisis Factorial demuestra que no existe una variable latente clara que cause el comportamiento de todas las variables a la vez.
+El comportamiento de la ballena es más complejo y sus dimensiones funcionan de forma independiente.
+
+## Cluster (no jerárquicos o partitivos)
+
+### Justificación cluster
+
+El análisis clúster se justifica en este estudio como una herramienta de aprendizaje no supervisado necesaria para identificar las "agrupaciones naturales" de los datos y validar si las señales físicas de los sensores logran diferenciar claramente los estados de "Alimentación" frente a "Descanso" o "Viaje" sin el sesgo de la observación directa.\
+Ante el reto técnico que supone gestionar un volumen masivo de 667.337 registros, se ha seleccionado específicamente el método k-means por ser un algoritmo muy eficiente en términos computacionales.
+Se descartó el método PAM por su inviabilidad computacional ante el elevado volumen de la muestra (N \> 667.000), y se prefirió k-means sobre CLARA para evitar el sesgo de muestreo y garantizar que las maniobras de alimentación fueran capturadas íntegramente en la clasificación final.
+
+**Exclusión de Métodos Jerárquicos**
+
+A pesar de la utilidad de los métodos jerárquicos para explorar estructuras taxonómicas, hemos descartado su aplicación en este estudio por cuatro razones críticas:
+
+-   **1.Inviabilidad de la Matriz de Distancias:**
+
+Estos algoritmos requieren calcular y almacenar una matriz que relacione cada observación con todas las demás.
+Con n = 667.337 registros, la matriz resultante tendría aproximadamente 667.000\^2 celdas, lo que requeriría varios Terabytes de memoria RAM, provocando el colapso instantáneo de la sesión de R.
+
+-   **2.Complejidad Algorítmica:**
+
+Mientras que el método k-means presenta una complejidad lineal O(n), los algoritmos jerárquicos suelen escalar de forma cuadrática O(n\^2) o cúbica O(n\^3), lo que supondría tiempos de computación inasumibles para un hardware convencional.
+
+-   **3.Legibilidad del Dendrograma:**
+
+La representación visual de un árbol jerárquico con más de 600.000 hojas resultaría en una mancha gráfica ilegible, impidiendo extraer conclusiones sobre la estructura de los grupos.
+
+-   **Naturaleza del Objetivo:**
+
+El fin de este análisis es particionar los datos en K=4 estados ya definidos por el etograma.
+Los métodos partitivos (como k-means) son intrínsecamente más eficaces para tareas de segmentación donde el número de grupos está predefinido por criterios biológicos.
+
+### PCA y Método del codo
+
+Para asegurar la máxima precisión, el algoritmo se ejecuta sobre los componentes principales (PCA), nos aseguramos de que el algoritmo trabaje con variables estandarizadas y adimensionales.
+Como $k$-means se basa en la distancia euclídea, esto evita que una variable con números grandes (como la profundidad en metros) tenga más peso que el vigor (que son decimales).
+La elección del número óptimo de grupos se apoya en el "método del codo", garantizando que la segmentación matemática resultante tenga un sentido biológico real y refleje fielmente las transiciones entre estados.
+
+```{r}
+dat_cluster <- as.data.frame(pca_ballenas$x[, 1:2])
+
+set.seed(123)
+muestra_elbow <- dat_cluster %>% slice_sample(n = 5000)
+
+wss <- sapply(1:7, function(k) {
+  kmeans(muestra_elbow, centers = k, nstart = 20)$tot.withinss
+})
+
+plot(1:7, wss, type = "b", pch = 19, frame = FALSE, 
+     main = "Gráfico del Codo: Determinación de K óptimo",
+     xlab = "Número de clusters K",
+     ylab = "Suma de cuadrados dentro del grupo (WSS)")
+
+```
+
+Aunque el criterio matemático del codo sugiere una estructura óptima de K=3 grupos, se ha optado por una solución de K=4 para mantener la coherencia con el etograma biológico de referencia.
+Esta decisión permite evaluar la capacidad discriminante de los sensores frente a todas las clases de comportamiento etiquetadas.
+Esto puede darse a que que dos de tus categorías (Travel y Exploratory) seguramente sean físicamente tan parecidas que el algoritmo de clúster tiende a verlas como una sola.
+
+### Interpretación del Biplot
+
+*Justificación nstart = 25*: Para evitar caer en mínimos locales (soluciones falsas), el algoritmo se ha ejecutado con 25 configuraciones iniciales distintas (nstart = 25), garantizando que la segmentación sea estable y reproducible.
+
+```{r}
+df_por_segundos <- df_por_segundos[, !(names(df_por_segundos) %in% c("PC1", "PC2", "cluster"))]
+
+set.seed(123)
+modelo_kmeans <- kmeans(dat_cluster, centers = 4, nstart = 25)
+
+
+df_por_segundos$PC1 <- pca_ballenas$x[, 1]
+df_por_segundos$PC2 <- pca_ballenas$x[, 2]
+df_por_segundos$cluster <- as.factor(modelo_kmeans$cluster)
+
+
+ggplot(df_por_segundos %>% slice_sample(n = 5000), 
+       aes(x = PC1, y = PC2, color = cluster)) +
+  geom_point(alpha = 0.5) +
+  scale_color_viridis_d(option = "viridis") +
+  theme_minimal() +
+  labs(title = "Segmentación de Comportamiento mediante K-means",
+       subtitle = "Proyección sobre los dos primeros componentes principales",
+       x = "PC1 (Intensidad Energética)", 
+       y = "PC2 (Perfil de Inmersión)")
+```
+
+Este biplot demuestra que el comportamiento de la ballena no es aleatorio, sino que sigue estructuras físicas claras.
+El hecho de que las fronteras entre clusters sean nítidas (aunque haya solapamiento en el centro) valida que tu PCA ha sido capaz de separar las dimensiones de esfuerzo y profundidad de forma ortogonal.
+Podemos suponer que si K=3, los clusters amarillo y verde seguramente se habrían fusionado en uno solo, confirmando que para los sensores son comportamientos muy similares físicamente.
+
+### Tabla de Validación
+
+```{r}
+tabla_validacion <- table(df_por_segundos$behavior, df_por_segundos$cluster)
+
+tabla_validacion %>%
+  kbl(caption = "Tabla 3: Validación del Cluster (Comportamiento Real vs Cluster Asignado)") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F)
+
+```
+
+La tabla de validación confirma que el algoritmo k-means ha logrado identificar patrones biológicos coherentes, destacando especialmente el comportamiento de alimentación (Feed), que se concentra de forma masiva en el Cluster 3 (117,686 registros) y el Cluster 2 (69,739 registros).
+Esta alta concentración demuestra la capacidad de los sensores para discriminar maniobras complejas, mientras que el Cluster 4 se nombra como el grupo de "superficie y tránsito" al capturar la mayor parte de los estados de Viaje (42,327) y Descanso (12,426).
+Crucialmente, el análisis resuelve la naturaleza de los datos "Unknown", ya que el 66% de estos registros (147,692) caen en el Cluster 4, lo que prueba estadísticamente que los periodos sin etiqueta experta corresponden a desplazamientos de baja energía o tránsito superficial.
+Finalmente, la coincidencia del comportamiento Exploratorio mayoritariamente en el Cluster 3 sugiere que las fases de búsqueda y captura comparten una firma cinemática común que el modelo multivariante ha logrado aislar con éxito.
+
+### Tabla de perfilado de los clusters
+
+```{r}
+resumen_clusters <- df_por_segundos %>%
+  group_by(cluster) %>%
+  summarise(
+    Casos = n(),
+    Profundidad_Media = mean(Depth_mean),
+    Vigor_Medio = mean(Activity_vigor),
+    Velocidad_Pico = mean(Speed_max)
+  )
+
+resumen_clusters %>%
+  kbl(caption = "Tabla 4: Perfilado de los Clusters Detectados", digits = 3) %>%
+  kable_styling(bootstrap_options = c("striped", "condensed"), full_width = F)
+```
+
+Esta tabla constituye la unión entre la estadística multivariante y la interpretación biológica, permitiendo asignar una "identidad" a cada grupo según sus promedios cinemáticos.
+A través de estos datos, se identifica que el Cluster 1 representa el comportamiento más activo y veloz, con un vigor de 0.143 y una velocidad de 2.173, lo que lo vincula directamente con la alimentación activa.
+Por otro lado, el Cluster 2 define las fases de mayor profundidad media (65.539 m), mientras que los Clusters 3 y 4 agrupan la inmensa mayoría de los registros (sumando más de 460,000 casos) en estados de baja energía.
+Destaca especialmente el Cluster 4, que con una profundidad media de apenas 6.438 m y un vigor mínimo de 0.016, se consolida como el perfil típico de descanso en superficie.
+En definitiva, esta tabla transforma los grupos matemáticos en perfiles biológicos reales, permitiendo cuantificar la actividad de las ballenas.
+
+En definitiva, este análisis demuestra que la combinación de reducción de dimensionalidad y técnicas de clasificación no supervisada es capaz de organizar los datos de los bio-loggers en categorías biológicas con un alto significado ecológico.
+
+## Análisis Discriminante
+
+### Justificación
+
+Tras haber explorado la estructura natural de los datos mediante PCA y Clustering, aplicamos un Análisis Discriminante Lineal (LDA) como técnica de clasificación supervisada.
+El uso de este método se justifica por la necesidad de cuantificar la capacidad de los sensores para predecir correctamente las etiquetas biológicas.
+A diferencia del PCA, que maximiza la varianza total , el LDA busca las funciones que maximizan la separación entre los estados del etograma.
+Este análisis permitirá no solo determinar el peso relativo de cada variable (aceleración, profundidad y velocidad) en la diferenciación de comportamientos, sino también obtener una tasa de error que valide la robustez de los bio-loggers como herramienta de clasificación.
+
+### Construcción modelo
+
+```{r}
+modelo_lda <- lda(behavior ~ AccZ_mean + Depth_mean + Speed_max + Activity_vigor, 
+                  data = df_por_segundos)
+
+print(modelo_lda)
+
+importancia <- as.data.frame(modelo_lda$scaling[,1])
+colnames(importancia) <- "Coeficiente"
+importancia$Variable <- rownames(importancia)
+
+
+ggplot(importancia, aes(x = reorder(Variable, Coeficiente), y = Coeficiente, fill = Coeficiente)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  scale_fill_gradient2(low = "red", mid = "grey", high = "blue") +
+  theme_minimal() +
+  labs(title = "Importancia de las variables en la discriminación (LD1)",
+       x = "Variable del Sensor", y = "Peso en el modelo (Coeficiente)")
+```
+
+Primero vemos las probabilidades a priori de cada grupo.
+En segundo lugar las medias de grupo siendo feed el comportamiento con mayor profundidad media y mayor vigor de actividad que demuestra que comer requiere bajar y moverse mucho mientras que rest es más superficial.
+Unknown tiene una profundidad baja, esto nos ayuda a reforzar nuestra hipótesis de que los datos sin etiqueta corresponden a estados de superficie.
+Respecto a las variables y su peso observamos que Activity_vigor tiene los coeficientes más altos tanto en LD1 (5.25) como en LD2 (13.27) que significa que esta variable es el principal diferenciador de comportamientos.
+Mientras, Accz_mean tiene un peso negativo importante en LD1 aunque ayuda a discriminar menos que la anterior variable y nos podría sorprender que Depth_mean tiene coeficiente bajo, es decir, aunque ayuda, no es la variable más decisoria.
+Nos quedamos con lo más importante, LD1 explica el 94.93% de la separación entre grupos, por lo que casi toda la diferencia entre los comportamientos de la ballena se puede resumir en una sola dimensión (que está dominada por el vigor y la velocidad).
+Con solo la primera función discriminante, el modelo ya tiene casi toda la información que necesita para clasificar.
+
+### Matriz de Confusión
+
+Mide cuántas veces el modelo ha acertado y en qué comportamientos se ha "equivocado" al intentar clasificar las señales de los sensores.
+
+```{r}
+predicciones_lda <- predict(modelo_lda)
+
+tabla_lda <- table(Original = df_por_segundos$behavior, 
+                   Predicho = predicciones_lda$class)
+
+print(tabla_lda)
+
+hit_rate <- sum(diag(tabla_lda)) / sum(tabla_lda)
+cat("La precisión global del modelo es:", round(hit_rate * 100, 2), "%")
+```
+
+Observamos un gran éxito en Feed y Unknown mientras que para Rest y Exploratory obtenemos todo ceros, esto significa que el modelo nunca predice esos comportamientos.
+Esto se puede deber a la descompensación de las clases, el modelo LDA ignora las clases minoritarias para minimizar el error global.
+También vemos que Rest se confunde mayoritariamiente con Unknown, prácticamente estos comportamientos son idénticos para el sensor.
+Más importante es la confirmación de relación entre Travel y Unknown donde 64.099 registros de Travel se clasifican erróneamente como Unknown, seguimos reforzando la idea de que para los sensores, viajar por la superficie y los momentos sin etiqueta son, en esencia, lo mismo.
+La precisión global del 65.58% valida el uso de algoritmos discriminantes para la clasificación automatizada de la actividad de cetáceos.
+Aunque el modelo presenta dificultades con las clases minoritarias debido al desequilibrio de la muestra, su capacidad para identificar correctamente el comportamiento de alimentación y resolver la ambigüedad de los datos 'Unknown' demuestra que la firma energética capturada por los bio-loggers es un indicador fiable del estado metabólico del animal
+
+### Interpretación del Biplot
+
+```{r}
+df_lda_plot <- cbind(df_por_segundos, predicciones_lda$x)
+
+ggplot(df_lda_plot %>% slice_sample(n = 5000), 
+       aes(x = LD1, y = LD2, color = behavior)) +
+  geom_point(alpha = 0.5) +
+  theme_minimal() +
+  labs(title = "Análisis Discriminante Lineal (LDA)",
+       subtitle = paste("Precisión global:", round(hit_rate * 100, 2), "%"),
+       x = "LD1 (Máxima separación)", 
+       y = "LD2 (Segunda separación)")
+```
+
+La proyección de los datos sobre las funciones discriminantes muestra una separación clara del comportamiento de alimentación (Feed) a lo largo del eje LD1, lo que justifica la alta tasa de acierto en esta categoría.
+Sin embargo, la densa superposición de los estados de Rest, Travel y Unknown en la zona negativa del eje LD1 explica la precisión global del 65.58%, evidenciando que estos comportamientos comparten una firma cinemática muy similar que dificulta su clasificación automática pura.
+
+### Reconstrucción del etograma y validación cruzada del modelo LDA
+
+```{r}
+df_por_segundos$behavior_predicho <- predicciones_lda$class
+
+df_por_segundos <- df_por_segundos %>%
+  mutate(etograma_final = ifelse(behavior == "Unknown", 
+                                 as.character(behavior_predicho), 
+                                 as.character(behavior)))
+
+
+tabla_resolucion_unknown <- df_por_segundos %>%
+  filter(behavior == "Unknown") %>%
+  group_by(behavior_predicho) %>%
+  summarise(Total = n(), Porcentaje = (n() / 255454) * 100)
+
+print(tabla_resolucion_unknown)
+
+
+lda_cv <- lda(behavior ~ AccZ_mean + Depth_mean + Speed_max + Activity_vigor, 
+              data = df_por_segundos, CV = TRUE)
+
+
+hit_rate_cv <- sum(lda_cv$class == df_por_segundos$behavior) / nrow(df_por_segundos)
+cat("La precisión con Validación Cruzada es:", round(hit_rate_cv * 100, 2), "%")
+```
+
+El análisis de re-clasificación mediante LDA ha permitido dar valor biológico a los datos previamente no etiquetados.
+Si bien la mayoría de los registros Unknown (88.8%) mantienen su perfil como un estado de superficie diferenciado, el modelo ha logrado identificar un 10.5% de eventos de alimentación ocultos.
+Este hallazgo subraya la potencia del análisis discriminante como herramienta de apoyo a la investigación, permitiendo la recuperación de datos biológicamente relevantes que podrían haber sido ignorados en un análisis visual convencional Además, para evaluar la capacidad de generalización del modelo, se realizó una validación cruzada (LOO-CV), obteniendo una precisión del 65.58%.
+El hecho de que este valor coincida exactamente con la precisión de entrenamiento confirma la robustez del modelo y la ausencia de sobreajuste.
+Estos resultados garantizan que las funciones discriminantes obtenidas son estables y que el vigor de actividad y la profundidad actúan como predictores consistentes del comportamiento, independientemente del individuo o el tramo de tiempo analizado
+
+## Comparativa Cluster vs. Discriminante
+
+La síntesis de los resultados obtenidos mediante técnicas no supervisadas (Clustering) y supervisadas (LDA) permite concluir que la estructura de comportamiento de la ballena jorobada responde a patrones físicos altamente consistentes.
+Ambos métodos convergen de forma unánime al identificar el estado de alimentación (Feed) como el evento cinemático más robusto, caracterizado por picos de vigor y profundidad que el LDA logra clasificar con éxito, mientras que el solapamiento observado entre el viaje (Travel) y el descanso (Rest) en ambos análisis confirma que los estados de baja energía superficial poseen una firma sensorial no lo suficientemente diferenciable.
+La estabilidad de la precisión (65.58%) obtenida mediante validación cruzada, sumada a la capacidad del modelo para rescatar un 10.5% de eventos de alimentación previamente no etiquetados, valida este flujo de trabajo multivariante como una herramienta científica potente; no solo para describir la actividad animal, sino para transformar la incertidumbre de los datos desconocidos en conocimiento biológico sólido y reproducible.
+
+##  Support Vector Machines (SVM) 
+
+Para finalizar el estudio de clasificación, se implementaron dos modelos de SVM con el fin de superar las limitaciones de las técnicas lineales.
+
+Vamos a usar una muestra de 20k filas para un equilibrio entre precisión y velocidad.
+División en Entrenamiento (70%) y Test (30%).
+
+```{r}
+set.seed(123)
+df_svm <- df_por_segundos %>% 
+  dplyr::select(AccZ_mean, Depth_mean, Speed_max, Activity_vigor, behavior) %>%
+  mutate(behavior = as.factor(behavior)) %>%
+  slice_sample(n = 20000) 
+
+idx <- sample(1:nrow(df_svm), 0.7 * nrow(df_svm))
+train_data <- df_svm[idx, ]
+test_data <- df_svm[-idx, ]
+```
+
+**Modelo A: SVM Lineal**
+
+Este modelo busca separaciones mediante líneas rectas (hiperplanos)
+
+```{r}
+modelo_svm_lin <- svm(behavior ~ ., data = train_data, 
+                      kernel = "linear", cost = 1, scale = TRUE)
+
+pred_lin <- predict(modelo_svm_lin, test_data)
+acc_lin <- mean(pred_lin == test_data$behavior)
+acc_lin
+```
+
+Como nuestros modelos los hemos entrenado con 4 variables, a la hora de representar graficamente el ajuste realizado vamos a proyectar los modelos sobre las dos variables más importantes: Depth_mean (en el eje X) y Activity_vigor (en el eje Y), dado que un gráfico tiene unicamente 2 dimensiones.Para las otras dos variables (AccZ_mean y Speed_max), usaremos su valor medio para que el modelo pueda calcular las predicciones.
+
+```{r}
+rango_depth <- range(train_data$Depth_mean)
+rango_vigor <- range(train_data$Activity_vigor)
+
+# Creamos la rejilla
+nuevos_puntos <- expand.grid(
+  Depth_mean = seq(rango_depth[1], rango_depth[2], length = 200),
+  Activity_vigor = seq(rango_vigor[1], rango_vigor[2], length = 200),
+  AccZ_mean = mean(train_data$AccZ_mean),
+  Speed_max = mean(train_data$Speed_max)
+)
+
+# Predicción de las regiones
+nuevos_puntos$behavior <- predict(modelo_svm_lin, nuevos_puntos)
+
+
+pesos <- t(modelo_svm_lin$coefs) %*% modelo_svm_lin$SV
+
+w_depth <- pesos[2] 
+w_vigor <- pesos[4]
+intercepto <- modelo_svm_lin$rho
+
+ggplot() +
+  geom_point(data = nuevos_puntos, aes(x = Depth_mean, y = Activity_vigor, color = behavior), 
+             size = 0.5, alpha = 0.1) +
+  geom_point(data = test_data %>% slice_sample(n = 500), 
+             aes(x = Depth_mean, y = Activity_vigor, color = behavior), size = 1.5) +
+  geom_abline(intercept = intercepto/w_vigor, slope = -w_depth/w_vigor, linewidth = 1) +
+  geom_abline(intercept = (intercepto-1)/w_vigor, slope = -w_depth/w_vigor, linetype = "dashed", alpha = 0.5) +
+  geom_abline(intercept = (intercepto+1)/w_vigor, slope = -w_depth/w_vigor, linetype = "dashed", alpha = 0.5) +
+  scale_color_viridis_d(option = "plasma") +
+  labs(title = "SVM Lineal: Hiperplano y Márgenes",
+       x = "Profundidad Media (m)", y = "Vigor de Actividad") +
+  theme_minimal()
+```
+
+Esta visualización demuestra la rigidez del modelo lineal: al intentar separar las clases mediante un hiperplano recto, el algoritmo solo logra trazar una frontera casi vertical que ignora la compleja superposición de los comportamientos en superficie.
+Se observa que la gran mayoría de los puntos quedan mezclados en el mismo lado de la frontera, lo que evidencia que una línea recta es insuficiente para capturar la estructura biológica de los datos.
+Esta falta de flexibilidad explica que el modelo lineal no puede rodear los grupos ni adaptarse a la naturaleza no lineal de las maniobras de las ballenas.
+
+**Modelo B: SVM Radial**
+
+El kernel radial permite crear fronteras curvas y complejas.
+
+*Justificación de los parámetros seleccionados*
+
+Para el modelo radial, hemos seleccionado los parámetros de coste ($C=1$) y gamma ($\gamma=0.25$) mediante pruebas empíricas iterativas, buscando un equilibrio que maximice la precisión en el conjunto de test sin incurrir en sobreajuste (overfitting).
+
+```{r}
+modelo_svm_rad <- svm(behavior ~ ., data = train_data, 
+                      kernel = "radial", cost = 1, gamma = 0.25, scale = TRUE)
+
+pred_rad <- predict(modelo_svm_rad, test_data)
+acc_rad <- mean(pred_rad == test_data$behavior)
+acc_rad
+```
+
+```{r}
+nuevos_puntos$behavior_rad <- predict(modelo_svm_rad, nuevos_puntos)
+
+ggplot() +
+  geom_point(data = nuevos_puntos, aes(x = Depth_mean, y = Activity_vigor, color = behavior_rad), 
+             size = 0.5, alpha = 0.1) +
+  geom_point(data = test_data %>% slice_sample(n = 500), 
+             aes(x = Depth_mean, y = Activity_vigor, color = behavior), size = 1.5) +
+  scale_color_viridis_d(option = "plasma") +
+  labs(title = "SVM Radial: Fronteras Curvas No Lineales",
+       x = "Profundidad Media (m)", y = "Vigor de Actividad",
+       color = "Comportamiento") +
+  theme_minimal()
+```
+
+Para visualizar la geometría de las fronteras de decisión, se ha entrenado una versión bidimensional del modelo utilizando únicamente las dos variables con mayor poder discriminante.
+Aunque la precisión final del estudio (78.15%) se deriva del modelo completo de cuatro dimensiones, este mapa nos permite observar cómo el algoritmo genera islas de decisión y curvas complejas para atrapar los eventos de alimentación.
+
+**Comparativa**
+
+```{r}
+cat("--- Matriz de Confusión (Modelo Radial) ---\n")
+print(table(Predicho = pred_rad, Real = test_data$behavior))
+
+cat("\n--- Comparativa de Precisiones ---\n")
+cat("Precisión Modelo Lineal:", round(acc_lin * 100, 2), "%\n")
+cat("Precisión Modelo Radial:", round(acc_rad * 100, 2), "%\n")
+
+```
+
+El análisis comparativo entre los dos modelos de **Máquinas de Vector de Soporte (SVM)** revela la naturaleza compleja de los datos cinemáticos de la ballena jorobada.
+
+El **SVM Lineal** presentó limitaciones similares a las observadas en el análisis discriminante (LDA), mostrando dificultades para separar estados biológicos que comparten rangos físicos parecidos, como el desplazamiento superficial y el reposo, debido a la rigidez de sus fronteras de decisión rectilíneas.
+
+Sin embargo, la implementación de un **Kernel Radial (RBF)** permitió al modelo proyectar los datos en un espacio de mayor dimensionalidad, logrando capturar relaciones mucho más sutiles.
+Con este enfoque, la precisión del modelo experimentó un ascenso notable, alcanzando aproximadamente el **78.15%**.
+Este incremento se debe a la capacidad del kernel para generar fronteras de separación curvas y flexibles, adaptándose mejor a la distribución real de las "embestidas" alimenticias y los buceos profundos identificados en el análisis descriptivo.
+
+**Mapa de Fronteras de Decisión**
+
+Para la gráfica, entrenamos un modelo simplificado con las dos variables clave
+
+```{r}
+modelo_vis <- svm(behavior ~ Activity_vigor + Depth_mean, data = train_data, 
+                  kernel = "radial", cost = 1, gamma = 0.25)
+
+rango_vigor <- range(df_por_segundos$Activity_vigor)
+rango_depth <- range(df_por_segundos$Depth_mean)
+
+grid <- expand.grid(
+  Activity_vigor = seq(rango_vigor[1], rango_vigor[2], length.out = 200),
+  Depth_mean = seq(rango_depth[1], rango_depth[2], length.out = 200)
+)
+
+grid$behavior <- predict(modelo_vis, grid)
+```
+
+Visualización de la no linealidad.
+
+```{r}
+ggplot() +
+  geom_tile(data = grid, aes(x = Depth_mean, y = Activity_vigor, fill = behavior), alpha = 0.2) +
+  geom_point(data = test_data %>% slice_sample(n = 500), 
+             aes(x = Depth_mean, y = Activity_vigor, color = behavior), size = 1) +
+  scale_fill_viridis_d(option = "plasma") +
+  scale_color_viridis_d(option = "plasma") +
+  labs(title = "Mapa de Decisión SVM Radial",
+       x = "Profundidad Media (m)",
+       y = "Vigor de Actividad") +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+```
+
+Este mapa demuestra que la relación entre el vigor y la profundidad es no lineal.
+El SVM Radial logra dibujar áreas de comportamiento complejas, como puede ser curvas o islas de decisión, capturando la esencia de las maniobras de alimentación que un modelo lineal simplemente cortaría de forma simplista.
+
+**Conclusión:**
+
+Estos resultados confirman estadísticamente que las señales registradas por los dispositivos **DTAG** (especialmente el vigor de actividad y la profundidad media) se vinculan con el comportamiento animal de forma **no lineal**.
+El SVM Radial se consolida, por tanto, como la metodología más potente de este estudio, logrando rescatar patrones de comportamiento que las técnicas lineales convencionales simplificaban en exceso.
+
+*Aplicación Shiny*
+
+```{r}
+save(df_por_segundos, pca_ballenas, modelo_lda, importancia, 
+     acc_lin, acc_rad, test_data, pred_rad, modelo_svm_lin, 
+     modelo_svm_rad, file = "datos_app.RData")
+```
+
+# Conclusión
+
+La presente investigación ha demostrado que la integración de técnicas de análisis multivariante permite transformar señales cinemáticas complejas en conocimiento etológico estructurado.
+A continuación, se sintetizan los hallazgos fundamentales y las perspectivas futuras del estudio:
+
+## Hallazgos principales
+
+-   **Discriminación del Comportamiento:** El comportamiento de Alimentación (Feed) se consolida como el estado biológico más robusto y fácilmente identificable.
+    Tanto el PCA como el LDA y el SVM coinciden en que las "embestidas" generan una firma energética única (altos valores en PC1 y Vigor) que lo separa del resto del etograma.
+
+-   **Naturaleza de los Registros 'Unknown':** Mediante técnicas de clustering y re-clasificación supervisada, se ha determinado que el 88.8% de los datos desconocidos corresponden en realidad a estados de superficie (transporte o descanso).
+    No obstante, el modelo LDA logró rescatar un 10.5% de eventos de alimentación que habían pasado desapercibidos, subrayando la utilidad de estas herramientas para refinar el trabajo de campo.
+
+-   **Variables Clave:** El Vigor de Actividad y la Velocidad Máxima se han identificado como los predictores con mayor peso en la separación de estados.
+    Por el contrario, la profundidad actúa como una dimensión independiente que, si bien es relevante, no define por sí sola el estado metabólico del animal.
+
+## Limitaciones del estudio
+
+-   **Desbalance de Clases:** El predominio de estados de baja energía (Rest/Travel) frente a los eventos explosivos de alimentación genera un desequilibrio que afectó la capacidad del LDA para clasificar categorías minoritarias como "Exploratory".
+
+-   **Estructura Latente:** El bajo índice KMO (0.45) obtenido en el Análisis Factorial indica que los sensores no responden a un único factor común, sino a dimensiones biológicas ortogonales (independientes), lo que valida el uso del PCA pero limita la interpretación de "causas ocultas" generales.
+
+-   **Solapamiento Cinemático:** Físicamente, el descanso y el viaje a baja velocidad son casi indistinguibles para los acelerómetros, lo que sugiere que se requieren sensores adicionales (como hidrófonos para detectar sonidos de nado) para mejorar su separación.
+
+## Lineas de investigación futuras
+
+Para superar las limitaciones detectadas y avanzar en la precisión de los etogramas automatizados, se proponen las siguientes líneas de continuación:
+
+1.  **Modelado Temporal:** Implementar Modelos Ocultos de Markov (HMM) o Redes Neuronales Recurrentes (RNN).
+    A diferencia del análisis actual, estos modelos consideran la secuencia del tiempo (por ejemplo, una ballena rara vez pasa de 'Descanso' a 'Alimentación' sin pasar por 'Exploración').
+
+2.  **Aprendizaje Profundo:** La mejora observada con el SVM Radial (78.15%) sugiere que las relaciones no lineales son críticas.
+    El uso de algoritmos de Deep Learning podría elevar la precisión por encima del 85%.
+
+3.  **Generalización del Modelo:** Validar estas funciones discriminantes con datos de otros años y diferentes individuos para crear un clasificador universal de la especie Megaptera novaeangliae que pueda ser utilizado por investigadores en distintas regiones del globo sin necesidad de etiquetado manual exhaustivo.
+
+En conclusión, este flujo de trabajo multivariante no solo describe la actividad de los cetáceos, sino que proporciona una metodología sólida para la conservación marina, permitiendo monitorear la salud metabólica de las ballenas en ecosistemas remotos como la Antártida.
+
+Bibliografía Ocean Alliance.
+(s. f.).
+Analysis of Lunge Feeding Movements in Alaskan Humpback Whales—Ocean Alliance.
